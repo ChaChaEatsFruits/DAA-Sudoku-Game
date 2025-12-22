@@ -93,7 +93,7 @@ class SudokuDuel:
         """Generate a simple Sudoku puzzle"""
         # Start with a valid solution
         board = [[0]*9 for _ in range(9)]
-        self.solve_complete(board)
+        self.solve_greedy(board)
         
         # Remove numbers to create puzzle
         cells = [(i, j) for i in range(9) for j in range(9)]

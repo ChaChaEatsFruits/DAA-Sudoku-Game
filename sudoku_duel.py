@@ -35,6 +35,9 @@ class SudokuDuel:
         # Create GUI
         self.create_widgets()
         self.new_game()
+
+        #initialise priority queue
+        self.pq=[]
     
     def create_widgets(self):
         # Status bar
@@ -91,9 +94,14 @@ class SudokuDuel:
     
     def generate_puzzle(self):
         """Generate a simple Sudoku puzzle"""
-        # Start with a valid solution
-        board = [[0]*9 for _ in range(9)]
-        self.solve_greedy(board)
+       # Step 1: Generate a fully solved valid board instantly
+        full_board = self.get_base_pattern()
+        
+        # Step 2: Shuffle it to create a unique game
+        full_board = self.shuffle_board(full_board)
+        
+        # Save this as the solution
+        self.board = copy.deepcopy(full_board)
         
         # Remove numbers to create puzzle
         cells = [(i, j) for i in range(9) for j in range(9)]
@@ -103,45 +111,105 @@ class SudokuDuel:
         remove_count = random.randint(40, 45)
         for i in range(remove_count):
             r, c = cells[i]
-            board[r][c] = 0
+            self.board[r][c] = 0
+        
+        return self.board
+    
+    def get_base_pattern(self):
+        """
+        Generates a static valid Sudoku board using a mathematical pattern.
+        Formula: (i * 3 + i // 3 + j) % 9 + 1
+        This creates a valid board by shifting rows.
+        """
+        def pattern(r, c): return (3 * (r % 3) + r // 3 + c) % 9
+        
+        # Randomize the mapping of numbers (e.g. 1->7, 2->4)
+        # This is the "Relabel Numbers" transformation
+        nums = list(range(1, 10))
+        random.shuffle(nums)
+        
+        # Build the board
+        board = [[nums[pattern(r, c)] for c in range(9)] for r in range(9)]
+        return board
+
+    def shuffle_board(self, board):
+        """
+        Apply valid transformations to randomize the board while keeping it solved.
+        """
+        # 1. Shuffle Rows within each "Band" of 3 rows
+        # Band 0: Rows 0,1,2 | Band 1: Rows 3,4,5 | Band 2: Rows 6,7,8
+        for i in range(0, 9, 3):
+            # Get the three rows in this band
+            block = board[i:i+3]
+            random.shuffle(block)
+            board[i:i+3] = block
+            
+        # 2. Shuffle Columns within each "Stack" of 3 columns
+        # To do this easily, we transpose the matrix (rows become cols), 
+        # shuffle rows (which are effectively cols), then transpose back.
+        board = list(map(list, zip(*board))) # Transpose
+        for i in range(0, 9, 3):
+            block = board[i:i+3]
+            random.shuffle(block)
+            board[i:i+3] = block
+        board = list(map(list, zip(*board))) # Transpose back
+
+        # 3. Shuffle "Row Bands" (Swap rows 0-2 with rows 3-5, etc.)
+        # Groups of 3 rows
+        bands = [board[i:i+3] for i in range(0, 9, 3)]
+        random.shuffle(bands)
+        # Flatten back into a 9x9 board
+        board = [row for band in bands for row in band]
+        
+        # 4. Shuffle "Column Stacks" (Swap cols 0-2 with cols 3-5, etc.)
+        # Transpose, shuffle bands, transpose back
+        board = list(map(list, zip(*board))) 
+        stacks = [board[i:i+3] for i in range(0, 9, 3)]
+        random.shuffle(stacks)
+        board = [row for stack in stacks for row in stack]
+        board = list(map(list, zip(*board)))
         
         return board
+
+
+
+
     
-    def solve_greedy(self, board):
-        """
-        Fill board using a greedy heuristic (no backtracking).
-        Chooses the empty cell with the fewest valid options and fills it.
-        """
-        """At each step, fill the empty cell that has the fewest valid choices (MRV heuristic), and pick one valid number immediately."""
+    # def solve_greedy(self, board):
+    #     """
+    #     Fill board using a greedy heuristic (no backtracking).
+    #     Chooses the empty cell with the fewest valid options and fills it.
+    #     """
+    #     """At each step, fill the empty cell that has the fewest valid choices (MRV heuristic), and pick one valid number immediately."""
 
-        while True:
-            best_cell = None
-            best_candidates = None
+    #     while True:
+    #         best_cell = None
+    #         best_candidates = None
 
-            # Find the empty cell with minimum remaining values (MRV)
-            for row in range(9):
-                for col in range(9):
-                    if board[row][col] == 0:
-                        candidates = [
-                            num for num in range(1, 10)
-                            if self.is_valid(board, row, col, num)
-                        ]
+    #         # Find the empty cell with minimum remaining values (MRV)
+    #         for row in range(9):
+    #             for col in range(9):
+    #                 if board[row][col] == 0:
+    #                     candidates = [
+    #                         num for num in range(1, 10)
+    #                         if self.is_valid(board, row, col, num)
+    #                     ]
 
-                        if not candidates:
-                            return False  # Greedy choice failed
+    #                     if not candidates:
+    #                         return False  # Greedy choice failed
 
-                        if best_cell is None or len(candidates) < len(best_candidates):
-                            best_cell = (row, col)
-                            best_candidates = candidates
+    #                     if best_cell is None or len(candidates) < len(best_candidates):
+    #                         best_cell = (row, col)
+    #                         best_candidates = candidates
 
-            # No empty cells left → solved
-            if best_cell is None:
-                return True
+    #         # No empty cells left → solved
+    #         if best_cell is None:
+    #             return True
 
-            row, col = best_cell
+    #         row, col = best_cell
 
-            # Greedy choice: pick the first (or random) valid number
-            board[row][col] = best_candidates[0]
+    #         # Greedy choice: pick the first (or random) valid number
+    #         board[row][col] = best_candidates[0]
     
     def find_empty(self, board):
         for i in range(9):
@@ -201,31 +269,71 @@ class SudokuDuel:
                         heapq.heappush(pq, (len(candidates), i, j, candidates))
         return pq
     
+    def initialize_priority_queue(self):
+        self.pq=[]
+        for i in range(9):
+            for j in range(9):
+                if self.board[i][j]==0:
+                    candidates=self.get_candidates(self.board,i,j)
+                    if candidates:
+                        heapq.heappush(self.pq,(len(candidates),i,j,candidates))
+
+    
+    def update_neighbors(self,row,col):
+        neighbours=set()
+        for i in range(9):
+            neighbours.add((row,i))
+            neighbours.add((i,col))
+
+        box_row,box_col=3*(row//3),3*(col//3)
+        for i in range(box_row,box_row+3):
+            for j in range(box_col,box_col+3):
+                neighbours.add((i,j))
+
+        for row,col in neighbours:
+            candidates=self.get_candidates(self.board,row,col)
+            # Just push the new state. The old state stays in the heap 
+            # but will be ignored later (Lazy Deletion).
+            heapq.heappush(self.pq,(len(candidates),row,col,candidates))
+
+    
     def ai_make_move(self):
-        """AI makes one greedy move"""
-        pq = self.build_priority_queue()
-        
-        if not pq:
-            return False
-        
-        # Get most constrained cell
-        _, row, col, candidates = heapq.heappop(pq)
-        
-        if not candidates:
-            return False
-        
-        # Greedy choice: pick first candidate (or random)
-        value = random.choice(list(candidates))
-        
-        # Make move
-        self.board[row][col] = value
-        self.cells[row][col].config(state="normal")
-        self.cells[row][col].delete(0, tk.END)
-        self.cells[row][col].insert(0, str(value))
-        self.cells[row][col].config(fg="red", state="disabled")
-        self.cell_colors[row][col] = "ai"
-        
-        return True
+        # Loop until we find a valid move or run out of options
+        while self.pq:
+            # Pop the best option
+            count, row, col, candidates = heapq.heappop(self.pq)
+            
+            # LAZY DELETION CHECK:
+            # If board[row][col] is not 0, it means this cell was already filled 
+            # by a previous update. Ignore this stale entry.
+            if self.board[row][col] != 0:
+                continue
+                
+            # Optional: Re-check candidates 
+            current_candidates = self.get_candidates(self.board, row, col)
+            if not current_candidates:
+                return False
+                
+            # Greedy Choice
+            value = random.choice(list(current_candidates))
+            
+            # Make the move
+            self.board[row][col] = value
+            
+            # --- GUI Updates (Copy your existing GUI code here) ---
+            self.cells[row][col].config(state="normal")
+            self.cells[row][col].delete(0, tk.END)
+            self.cells[row][col].insert(0, str(value))
+            self.cells[row][col].config(fg="red", state="disabled")
+            self.cell_colors[row][col] = "ai"
+            
+
+            # Update the neighbors so the PQ is ready for the next turn
+            self.update_neighbors(row, col)
+            
+            return True
+            
+        return False
     
     def on_cell_edit(self, row, col):
         """Handle user input"""
@@ -255,6 +363,9 @@ class SudokuDuel:
             
             if self.is_valid(self.board, row, col, num):
                 self.board[row][col] = num
+
+                self.update_neighbors(row, col)
+
                 cell.config(fg="blue")
                 self.cell_colors[row][col] = "user"
                 
@@ -305,9 +416,13 @@ class SudokuDuel:
     def new_game(self):
         """Start a new game"""
         self.board = self.generate_puzzle()
+        
         self.initial_board = copy.deepcopy(self.board)
         self.current_turn = "user"
         self.cell_colors = [[None]*9 for _ in range(9)]
+        
+        self.initialize_priority_queue()
+
         self.render_board()
         self.status_label.config(text="User's Turn")
     
@@ -331,21 +446,32 @@ class SudokuDuel:
     
     def show_hint(self):
         """Highlight most constrained empty cell"""
-        pq = self.build_priority_queue()
-        
-        if not pq:
+        if not self.pq:
             messagebox.showinfo("Hint", "No empty cells remaining!")
             return
+            
+        # Clean the top of the heap (remove stale entries)
+        while self.pq and self.board[self.pq[0][1]][self.pq[0][2]] != 0:
+            heapq.heappop(self.pq)
+            
+        if not self.pq:
+            messagebox.showinfo("Hint", "No empty cells remaining!")
+            return
+
+        
+        _, row, col, candidates = self.pq[0]
         
         # Clear previous highlights
         for i in range(9):
             for j in range(9):
                 self.cells[i][j].config(bg="white")
         
-        # Highlight most constrained
-        _, row, col, candidates = pq[0]
         self.cells[row][col].config(bg="#ffeb3b")
-        messagebox.showinfo("Hint", f"Most constrained cell: Row {row+1}, Col {col+1}\nCandidates: {sorted(candidates)}")
+        
+        # Re-calculate exact candidates for the display message to be 100% accurate
+        
+        real_candidates = self.get_candidates(self.board, row, col)
+        messagebox.showinfo("Hint", f"Most constrained cell: Row {row+1}, Col {col+1}\nCandidates: {sorted(real_candidates)}")
     
     def ai_play(self):
         """Force AI to play regardless of turn"""

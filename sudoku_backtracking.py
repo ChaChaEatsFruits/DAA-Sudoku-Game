@@ -4,6 +4,7 @@ from TkToolTip import ToolTip
 import copy
 import heapq
 from sudoku_analysis import open_analysis_window
+import random
 
 
 class BitmaskSolver:
@@ -284,6 +285,66 @@ BENCHMARK_SOLVERS = {
     "Backtracking":     solve_backtracking_standalone,
     "Hybrid (D&C+DP)":  solve_hybrid_standalone,
 }
+
+####
+# ---------- Shared helper functions ----------
+
+def get_base_pattern():
+    """Create a valid completed Sudoku board using a mathematical pattern."""
+    def pattern(r, c):
+        return (3 * (r % 3) + r // 3 + c) % 9
+    nums = list(range(1, 10))
+    random.shuffle(nums)
+    return [[nums[pattern(r, c)] for c in range(9)] for r in range(9)]
+
+
+def shuffle_board(board):
+    """Randomise a valid board by shuffling rows/columns within bands."""
+    for i in range(0, 9, 3):
+        block = board[i:i + 3]
+        random.shuffle(block)
+        board[i:i + 3] = block
+    board = list(map(list, zip(*board)))
+    for i in range(0, 9, 3):
+        block = board[i:i + 3]
+        random.shuffle(block)
+        board[i:i + 3] = block
+    board = list(map(list, zip(*board)))
+    return board
+
+def generate_puzzle(difficulty="Medium"):
+    """Generate a valid Sudoku puzzle with a unique solution."""
+    full_board = shuffle_board(get_base_pattern())
+    solution = copy.deepcopy(full_board)
+    board = copy.deepcopy(full_board)
+
+    if difficulty == "Easy":
+        target_holes = 30
+    elif difficulty == "Medium":
+        target_holes = 45
+    else:
+        target_holes = 55
+
+    cells = [(r, c) for r in range(9) for c in range(9)]
+    random.shuffle(cells)
+
+    solver = BitmaskSolver()
+    holes = 0
+
+    for r, c in cells:
+        if holes >= target_holes:
+            break
+        backup = board[r][c]
+        board[r][c] = 0
+        solutions = solver.count_solutions(copy.deepcopy(board), limit=2)
+        if solutions != 1:
+            board[r][c] = backup
+        else:
+            holes += 1
+
+    return board, solution
+
+#####
 
 from sudoku_analysis import open_analysis_window
 

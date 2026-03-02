@@ -786,6 +786,40 @@ class SudokuDuel:
         with open(self.log_filename, "a", encoding="utf-8") as f:
             f.write(f"[{time.strftime('%H:%M:%S')}] {msg}\n")
 
+    def _play_sound(self, kind="click"):
+        """Play a sound effect in a background thread (cross-platform)."""
+        def _do_play():
+            try:
+                import platform
+                system = platform.system()
+                if system == "Darwin":  # macOS
+                    sound_map = {
+                        "click":    "/System/Library/Sounds/Tink.aiff",
+                        "complete": "/System/Library/Sounds/Glass.aiff",
+                    }
+                    path = sound_map.get(kind, sound_map["click"])
+                    import subprocess
+                    subprocess.Popen(
+                        ["afplay", path],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                elif system == "Windows":
+                    import winsound
+                    if kind == "complete":
+                        winsound.PlaySound("SystemExclamation", winsound.SND_ALIAS | winsound.SND_ASYNC)
+                    else:
+                        winsound.MessageBeep(winsound.MB_OK)
+                else:
+                    # Linux / other — silent fallback
+                    self.root.after(0, self.root.bell)
+            except Exception:
+                try:
+                    self.root.after(0, self.root.bell)
+                except Exception:
+                    pass
+        threading.Thread(target=_do_play, daemon=True).start()
+
     # ---- GUI ----
 
     def create_widgets(self):
@@ -1017,21 +1051,28 @@ class SudokuDuel:
         if not self.ai_make_move():
             if self.is_complete():
                 self.game_over = True
+                self._play_sound("complete")
                 messagebox.showinfo("Game Over", "Puzzle Complete!")
             else:
-                messagebox.showinfo("Game Over", "AI cannot find a solution (Unsolvable state).")
-                self.new_game()
+                # Don't end the game — let the user make a corrective move
+                self.current_turn = "user"
+                self._update_status()
+                messagebox.showinfo(
+                    "AI Stuck",
+                    "AI cannot find a solution from this state.\n"
+                    "Please make a move to help the AI continue.",
+                )
             return
 
         if self.is_complete():
             self.game_over = True
+            self._play_sound("complete")
             messagebox.showinfo("Game Over", "Puzzle Complete! AI Finished it.")
             return
 
         self.current_turn = "user"
         self._update_status()
 
-<<<<<<< HEAD
     # ---- User interaction ----
 
     def _clear_number_highlights(self):
@@ -1049,8 +1090,6 @@ class SudokuDuel:
                 else:
                     self.cells[i][j].configure(fg_color=COLORS["bg_cell"])
 
-=======
->>>>>>> 560f5de34b98901522d6ee136a1a859d4b667603
     def on_cell_edit(self, row, col):
         if self.game_over or self.current_turn != "user" or self.initial_board[row][col] != 0:
             return
@@ -1078,10 +1117,11 @@ class SudokuDuel:
                 self.pq_entries.discard((row, col))
                 self.update_neighbors(row, col)
                 cell.configure(text_color=COLORS["text_user"])
-                self._highlight_number(num)
+                self._play_sound("click")
 
                 if self.is_complete():
                     self.game_over = True
+                    self._play_sound("complete")
                     messagebox.showinfo("Game Over", "Puzzle Complete! You Win!")
                     return
 

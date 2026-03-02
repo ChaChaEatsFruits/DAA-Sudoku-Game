@@ -344,6 +344,18 @@ def generate_puzzle(difficulty="Medium"):
 
     return board, solution
 
+def generate_benchmark_puzzle(holes=45):
+    """Generate a puzzle with a given number of holes for benchmarking."""
+    full = shuffle_board(get_base_pattern())
+    board = copy.deepcopy(full)
+    cells = [(r, c) for r in range(9) for c in range(9)]
+    random.shuffle(cells)
+    for i in range(min(holes, len(cells))):
+        r, c = cells[i]
+        board[r][c] = 0
+    return board
+
+
 #####
 
 from sudoku_analysis import open_analysis_window

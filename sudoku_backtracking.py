@@ -1,9 +1,16 @@
+import threading
+import time
 
 import customtkinter as ctk
+import tkinter as tk
 from tkinter import messagebox
 from tktooltip import ToolTip
 from tkinter import ttk
 import heapq
+from sudoku_analysis import open_analysis_window
+import random
+
+
 import random
 import copy
 import subprocess
@@ -289,6 +296,266 @@ BENCHMARK_SOLVERS = {
     "Backtracking":     solve_backtracking_standalone,
     "Hybrid (D&C+DP)":  solve_hybrid_standalone,
 }
+
+####
+# ---------- Shared helper functions ----------
+
+def get_base_pattern():
+    """Create a valid completed Sudoku board using a mathematical pattern."""
+    def pattern(r, c):
+        return (3 * (r % 3) + r // 3 + c) % 9
+    nums = list(range(1, 10))
+    random.shuffle(nums)
+    return [[nums[pattern(r, c)] for c in range(9)] for r in range(9)]
+
+
+def shuffle_board(board):
+    """Randomise a valid board by shuffling rows/columns within bands."""
+    for i in range(0, 9, 3):
+        block = board[i:i + 3]
+        random.shuffle(block)
+        board[i:i + 3] = block
+    board = list(map(list, zip(*board)))
+    for i in range(0, 9, 3):
+        block = board[i:i + 3]
+        random.shuffle(block)
+        board[i:i + 3] = block
+    board = list(map(list, zip(*board)))
+    return board
+
+def generate_puzzle(difficulty="Medium"):
+    """Generate a valid Sudoku puzzle with a unique solution."""
+    full_board = shuffle_board(get_base_pattern())
+    solution = copy.deepcopy(full_board)
+    board = copy.deepcopy(full_board)
+
+    if difficulty == "Easy":
+        target_holes = 30
+    elif difficulty == "Medium":
+        target_holes = 45
+    else:
+        target_holes = 55
+
+    cells = [(r, c) for r in range(9) for c in range(9)]
+    random.shuffle(cells)
+
+    solver = BitmaskSolver()
+    holes = 0
+
+    for r, c in cells:
+        if holes >= target_holes:
+            break
+        backup = board[r][c]
+        board[r][c] = 0
+        solutions = solver.count_solutions(copy.deepcopy(board), limit=2)
+        if solutions != 1:
+            board[r][c] = backup
+        else:
+            holes += 1
+
+    return board, solution
+
+def generate_benchmark_puzzle(holes=45):
+    """Generate a puzzle with a given number of holes for benchmarking."""
+    full = shuffle_board(get_base_pattern())
+    board = copy.deepcopy(full)
+    cells = [(r, c) for r in range(9) for c in range(9)]
+    random.shuffle(cells)
+    for i in range(min(holes, len(cells))):
+        r, c = cells[i]
+        board[r][c] = 0
+    return board
+
+
+
+BENCHMARK_BG   = "#1a1a2e"
+BENCHMARK_CARD = "#16213e"
+BENCHMARK_ACCENT = "#e94560"
+
+COMPLEXITY_TABLE = [
+    ["Greedy (PQ)",      "O(n\u00b2 log n)", "Fast but incomplete",  "O(n\u00b2)",   "No backtracking; may fail"],
+    ["Divide & Conquer", "O(9^n)",      "Fast with MRV",        "O(n)",    "Recursive subproblem split"],
+    ["DP (Bitmask)",     "O(9^n)",      "Near-instant",         "O(n+27)", "O(1) constraint via bits"],
+    ["Backtracking",     "O(9^n)",      "Near-instant w/ MRV",  "O(n+27)", "Classic + bitmask + MRV"],
+    ["Hybrid (D&C+DP)",  "O(9^n)",      "Fastest practical",    "O(n+27)", "Two-phase: D&C then DP"],
+]
+
+
+def open_benchmark_window(parent_root):
+    """
+    Open a Toplevel window that benchmarks all 5 solvers and
+    displays results as a matplotlib bar chart + complexity table.
+    """
+    win = tk.Toplevel()
+    win.title("Algorithm Comparison \u2014 Sudoku Solver Benchmark")
+    win.geometry("960x800")
+    win.configure(bg=BENCHMARK_BG)
+    win.resizable(False, False)
+
+    tk.Label(
+        win, text="\U0001f4ca  Algorithm Comparison",
+        font=("Segoe UI", 22, "bold"), bg=BENCHMARK_BG, fg="#ffffff",
+    ).pack(pady=(15, 5))
+
+    status_lbl = tk.Label(
+        win, text="Click 'Run Benchmark' to start...",
+        font=("Segoe UI", 12), bg=BENCHMARK_BG, fg="#a8b2d1",
+    )
+    status_lbl.pack(pady=(0, 10))
+
+    results_frame = tk.Frame(win, bg=BENCHMARK_BG)
+    results_frame.pack(fill="both", expand=True, padx=20, pady=5)
+
+    # --- Control buttons ---
+    btn_frame = tk.Frame(win, bg=BENCHMARK_BG)
+    btn_frame.pack(pady=10)
+
+    tk.Button(
+        btn_frame, text="\U0001f680  Run Benchmark",
+        font=("Segoe UI", 11, "bold"),
+        bg=BENCHMARK_ACCENT, fg="#ffffff",
+        activebackground="#ff6b81", relief="flat",
+        padx=15, pady=6, cursor="hand2",
+        command=lambda: _run_benchmark_thread(parent_root, status_lbl, results_frame),
+    ).pack(side="left", padx=5)
+
+    tk.Button(
+        btn_frame, text="Close",
+        font=("Segoe UI", 11, "bold"),
+        bg="#8892b0", fg=BENCHMARK_BG,
+        relief="flat", padx=15, pady=6, cursor="hand2",
+        command=win.destroy,
+    ).pack(side="left", padx=5)
+
+    # --- Complexity table ---
+    _build_complexity_table(win)
+
+def _build_complexity_table(parent):
+    """Render the algorithm complexity analysis table in the given parent."""
+    table_frame = tk.Frame(parent, bg=BENCHMARK_CARD, bd=1, relief="solid")
+    table_frame.pack(fill="x", padx=20, pady=(5, 10))
+
+    tk.Label(
+        table_frame, text="Algorithm Complexity Analysis",
+        font=("Segoe UI", 13, "bold"), bg=BENCHMARK_CARD, fg="#ffffff",
+    ).pack(anchor="w", padx=10, pady=(8, 5))
+
+    headers = ["Algorithm", "Time (Worst)", "Time (Practical)", "Space", "Key Characteristic"]
+    grid_f = tk.Frame(table_frame, bg=BENCHMARK_CARD)
+    grid_f.pack(fill="x", padx=10, pady=(0, 8))
+
+    for ci, h in enumerate(headers):
+        tk.Label(
+            grid_f, text=h, font=("Segoe UI", 9, "bold"),
+            bg="#0f3460", fg="#ffffff", padx=8, pady=4, anchor="w",
+        ).grid(row=0, column=ci, sticky="nsew", padx=1, pady=1)
+
+    for ri, row_data in enumerate(COMPLEXITY_TABLE):
+        bg = BENCHMARK_CARD if ri % 2 == 0 else "#1f2b47"
+        for ci, val in enumerate(row_data):
+            tk.Label(
+                grid_f, text=val, font=("Consolas", 9),
+                bg=bg, fg="#a8b2d1", padx=8, pady=3, anchor="w",
+            ).grid(row=ri + 1, column=ci, sticky="nsew", padx=1, pady=1)
+
+    for ci in range(len(headers)):
+        grid_f.columnconfigure(ci, weight=1)
+
+    analysis = (
+        "Analysis Summary:\n"
+        "\u2022 n = number of empty cells.  All exact solvers share O(9^n) worst-case time.\n"
+        "\u2022 Greedy is the only incomplete solver \u2014 it cannot guarantee a solution.\n"
+        "\u2022 Bitmask state compression provides O(1) constraint checks vs O(n) for set-based.\n"
+        "\u2022 MRV heuristic reduces practical branching factor from 9 to ~2-3.\n"
+        "\u2022 Hybrid combines D&C subgrid decomposition with DP speed."
+    )
+    tk.Label(
+        table_frame, text=analysis, font=("Segoe UI", 9),
+        bg=BENCHMARK_CARD, fg="#8892b0", justify="left", anchor="w",
+    ).pack(anchor="w", padx=10, pady=(0, 10))
+
+
+def _run_benchmark_thread(parent_root, status_lbl, results_frame):
+    """Run the benchmark in a background thread to keep the UI responsive."""
+    status_lbl.config(text="\u23f3 Running benchmark... please wait")
+
+    def worker():
+        results = benchmark_all_solvers()
+        parent_root.after(0, lambda: _display_benchmark_results(results, status_lbl, results_frame))
+
+    threading.Thread(target=worker, daemon=True).start()
+
+def _display_benchmark_results(results, status_lbl, results_frame):
+    """Show benchmark results as matplotlib bar charts (with text fallback)."""
+    status_lbl.config(text="\u2705 Benchmark complete!")
+
+    for child in results_frame.winfo_children():
+        child.destroy()
+
+    try:
+        import matplotlib
+        matplotlib.use("TkAgg")
+        import matplotlib.pyplot as plt
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+        import numpy as np
+
+        fig, axes = plt.subplots(1, 3, figsize=(9.2, 3.2), dpi=100)
+        fig.patch.set_facecolor(BENCHMARK_BG)
+        fig.subplots_adjust(wspace=0.35, bottom=0.28, top=0.85)
+
+        solver_names = list(BENCHMARK_SOLVERS.keys())
+        bar_colors = ["#3498db", "#9b59b6", "#2ecc71", "#e74c3c", "#f39c12"]
+
+        for ax_idx, (diff_name, diff_data) in enumerate(results.items()):
+            ax = axes[ax_idx]
+            ax.set_facecolor("#16213e")
+            avg_times = [diff_data[s]["avg"] for s in solver_names]
+            x = np.arange(len(solver_names))
+            bars = ax.bar(x, avg_times, color=bar_colors, width=0.6,
+                          edgecolor="#ffffff", linewidth=0.5)
+            for bar, val in zip(bars, avg_times):
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2,
+                    bar.get_height() + max(avg_times) * 0.02,
+                    f"{val:.2f}", ha="center", va="bottom",
+                    fontsize=7, color="#ffffff", fontweight="bold",
+                )
+            ax.set_title(diff_name, color="#ffffff", fontsize=11, fontweight="bold")
+            ax.set_ylabel("Time (ms)", color="#a8b2d1", fontsize=8)
+            ax.set_xticks(x)
+            ax.set_xticklabels(["Greedy", "D&C", "DP", "BT", "Hybrid"],
+                               rotation=30, ha="right", fontsize=7, color="#a8b2d1")
+            ax.tick_params(axis="y", colors="#a8b2d1", labelsize=7)
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+            ax.spines["left"].set_color("#a8b2d1")
+            ax.spines["bottom"].set_color("#a8b2d1")
+
+        fig.suptitle("Solve Time Comparison (avg of 5 runs, in ms)",
+                     color="#ffffff", fontsize=12, fontweight="bold")
+        canvas = FigureCanvasTkAgg(fig, master=results_frame)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill="both", expand=True, pady=5)
+
+    except ImportError:
+        tk.Label(
+            results_frame,
+            text="\u26a0 matplotlib not installed \u2014 showing text results.\n"
+                 "Install with: pip install matplotlib",
+            font=("Segoe UI", 12), bg=BENCHMARK_BG, fg=BENCHMARK_ACCENT,
+        ).pack(pady=10)
+        for diff_name, diff_data in results.items():
+            tk.Label(
+                results_frame, text=f"\n--- {diff_name} ---",
+                font=("Consolas", 11, "bold"), bg=BENCHMARK_BG, fg="#ffffff",
+            ).pack(anchor="w")
+            for solver_name, stats in diff_data.items():
+                text = f"  {solver_name:20s}  avg={stats['avg']:.3f}ms  min={stats['min']:.3f}ms  max={stats['max']:.3f}ms"
+                tk.Label(
+                    results_frame, text=text, font=("Consolas", 9),
+                    bg=BENCHMARK_BG, fg="#a8b2d1",
+                ).pack(anchor="w")
+#####
 
 from sudoku_analysis import open_analysis_window
 

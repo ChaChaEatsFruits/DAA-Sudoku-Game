@@ -749,9 +749,11 @@ class SudokuDuel:
     def __init__(self, root):
         self.root = root
         self.root.title("Sudoku Solver")
-        self.root.geometry("680x780")
+        screen_h = self.root.winfo_screenheight()
+        height = min(700, max(560, screen_h - 120))
+        self.root.geometry(f"680x{height}")
         self.root.configure(fg_color=COLORS["bg_dark"])
-        self.root.resizable(False, False)
+        self.root.resizable(True, True)
 
         self.board = [[0] * 9 for _ in range(9)]
         self.initial_board = [[0] * 9 for _ in range(9)]
@@ -770,6 +772,11 @@ class SudokuDuel:
 
         self.pq = []
         self.pq_entries = set()
+
+        self.main_frame = ctk.CTkScrollableFrame(
+            self.root, fg_color="transparent"
+        )
+        self.main_frame.pack(fill="both", expand=True, padx=4, pady=4)
 
         self.create_widgets()
         self.new_game()
@@ -826,7 +833,7 @@ class SudokuDuel:
     # ---- GUI ----
 
     def create_widgets(self):
-        title_frame = ctk.CTkFrame(self.root, fg_color="transparent")
+        title_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         title_frame.pack(pady=(10, 0))
 
         ctk.CTkLabel(
@@ -839,12 +846,12 @@ class SudokuDuel:
         )
         self.subtitle.pack(pady=(2, 0))
         self.status_label = ctk.CTkLabel(
-            self.root, text="Your Turn",
+            self.main_frame, text="Your Turn",
             font=FONT_STATUS, text_color=COLORS["accent_green"],
         )
         self.status_label.pack(pady=(6, 4))
 
-        diff_frame = ctk.CTkFrame(self.root, fg_color="transparent")
+        diff_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         diff_frame.pack(pady=(2, 4))
         ctk.CTkLabel(
             diff_frame, text="Difficulty",
@@ -861,7 +868,7 @@ class SudokuDuel:
         )
         self.diff_menu.pack(side="left")
 
-        algo_frame = ctk.CTkFrame(self.root, fg_color="transparent")
+        algo_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         algo_frame.pack(pady=(2, 4))
         ctk.CTkLabel(
             algo_frame, text="Algorithm",
@@ -879,7 +886,7 @@ class SudokuDuel:
         self.algo_menu.pack(side="left")
 
         board_outer = ctk.CTkFrame(
-            self.root, fg_color=COLORS["border_block"], corner_radius=12,
+            self.main_frame, fg_color=COLORS["border_block"], corner_radius=12,
         )
         board_outer.pack(pady=4, padx=20)
         board_inner = ctk.CTkFrame(
@@ -903,7 +910,7 @@ class SudokuDuel:
                 cell.bind("<KeyRelease>", lambda e, r=i, c=j: self.on_cell_edit(r, c))
                 self.cells[i][j] = cell
 
-        btn_frame = ctk.CTkFrame(self.root, fg_color="transparent")
+        btn_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         btn_frame.pack(pady=(8, 4))
         buttons = [
             ("  NEW GAME", self.new_game,       COLORS["accent_green"],  "Start a fresh puzzle"),
@@ -932,7 +939,7 @@ class SudokuDuel:
 
         self.strict_var = ctk.BooleanVar(value=False)
         strict_check = ctk.CTkCheckBox(
-            self.root, text="Strict Mode  (correct values only)",
+            self.main_frame, text="Strict Mode  (correct values only)",
             variable=self.strict_var, font=FONT_SMALL,
             text_color=COLORS["text_secondary"],
             fg_color=COLORS["accent_purple"], hover_color="#8e24aa",
@@ -1209,7 +1216,7 @@ class SudokuLauncher:
         self.root.title("Sudoku Algorithm Lab")
         self.root.geometry("820x740")
         self.root.configure(bg=BG_DARK_L)
-        self.root.resizable(False, False)
+        self.root.resizable(True, True)
         self._build_ui()
 
     def _build_ui(self):
